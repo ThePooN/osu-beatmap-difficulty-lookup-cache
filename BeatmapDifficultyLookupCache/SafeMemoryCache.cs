@@ -79,7 +79,7 @@ namespace BeatmapDifficultyLookupCache
                         if (!isCurrentTask())
                             return value;
 
-                        // If the entry is still valid, set its options.
+                        // If the entry is still valid, allow the user to now set its options.
                         using (var entry = cache.CreateEntry(key))
                         {
                             entry.SetValue(creationTask); // Copy the current value across.
