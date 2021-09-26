@@ -50,7 +50,13 @@ namespace BeatmapDifficultyLookupCache
             if (request.BeatmapId == 0)
                 return empty_attributes;
 
-            var ruleset = available_rulesets.First(r => r.RulesetInfo.ID == request.RulesetId);
+            var ruleset = available_rulesets.FirstOrDefault(r => r.RulesetInfo.ID == request.RulesetId);
+
+            if (ruleset == null)
+            {
+                logger.LogWarning("Could not find ruleset {Ruleset}", request.RulesetId);
+                return empty_attributes;
+            }
 
             // Recreate the request, this time with any irrelevant mods trimmed out, for caching purposes.
             request = new DifficultyRequest
@@ -83,7 +89,7 @@ namespace BeatmapDifficultyLookupCache
                 catch (Exception e)
                 {
                     entry.SetSlidingExpiration(TimeSpan.FromDays(1));
-                    logger.LogWarning($"Request failed with \"{e.Message}\"");
+                    logger.LogWarning("Request failed with {Message}", e.Message);
                     return empty_attributes;
                 }
             });
