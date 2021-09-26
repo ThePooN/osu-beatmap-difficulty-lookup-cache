@@ -2,17 +2,17 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace BeatmapDifficultyLookupCache
 {
+    /// <summary>
+    /// A memory cache utilising a backing <see cref="IMemoryCache"/> in an asynchronously-safe manner.
+    /// </summary>
     public class SafeMemoryCache
     {
-        private readonly Dictionary<object, Task> inProgressTasks = new Dictionary<object, Task>();
-
         private readonly IMemoryCache cache;
 
         public SafeMemoryCache(IMemoryCache cache)
@@ -22,34 +22,39 @@ namespace BeatmapDifficultyLookupCache
 
         public bool TryGetValue<T>(object key, [NotNullWhen(true)] out Task<T>? task)
         {
-            lock (inProgressTasks)
+            lock (cache)
             {
-                if (inProgressTasks.TryGetValue(key, out var existing))
+                if (cache.TryGetValue(key, out var existing))
                 {
-                    task = (Task<T>)existing;
-                    return true;
-                }
+                    switch (existing)
+                    {
+                        case Task t:
+                            task = (Task<T>)t;
+                            return true;
 
-                if (cache.TryGetValue(key, out var cached))
-                {
-                    task = Task.FromResult((T)cached);
-                    return true;
-                }
+                        case object o:
+                            task = Task.FromResult((T)o);
+                            return true;
 
-                task = null;
-                return false;
+                        default:
+                            throw new Exception("Invalid type.");
+                    }
+                }
             }
+
+            task = null;
+            return false;
         }
 
         public Task<T> GetOrAddAsync<T>(object key, Func<Task<T>> valueCreator, Action<ICacheEntry, T> setOptions)
         {
-            lock (inProgressTasks)
+            lock (cache)
             {
                 if (TryGetValue<T>(key, out var existingTask))
                     return existingTask;
 
                 var task = createAdditionTask();
-                inProgressTasks[key] = task;
+                cache.Set(key, task);
                 return task;
             }
 
@@ -57,18 +62,18 @@ namespace BeatmapDifficultyLookupCache
             {
                 var value = await valueCreator().ConfigureAwait(false);
 
-                lock (inProgressTasks)
+                lock (cache)
                 {
-                    if (!inProgressTasks.ContainsKey(key))
+                    // Check if the entry is still in the dictionary. It could have been removed during the above value creation via a call to Remove().
+                    if (!cache.TryGetValue(key, out _))
                         return value;
 
+                    // If the entry still exists, replace it with the new value.
                     using (var entry = cache.CreateEntry(key))
                     {
                         entry.SetValue(value);
                         setOptions(entry, value);
                     }
-
-                    inProgressTasks.Remove(key);
 
                     return value;
                 }
@@ -77,11 +82,8 @@ namespace BeatmapDifficultyLookupCache
 
         public void Remove(object key)
         {
-            lock (inProgressTasks)
-            {
-                inProgressTasks.Remove(key);
+            lock (cache)
                 cache.Remove(key);
-            }
         }
     }
 }
