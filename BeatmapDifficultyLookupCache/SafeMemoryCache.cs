@@ -38,20 +38,8 @@ namespace BeatmapDifficultyLookupCache
             {
                 if (cache.TryGetValue(key, out var existing))
                 {
-                    switch (existing)
-                    {
-                        case Task t:
-                            task = (Task<T>)t;
-                            return true;
-
-                        case object o:
-                            task = Task.FromResult((T)o);
-                            return true;
-
-                        default:
-                            // This cannot happen.
-                            throw new Exception("Invalid type.");
-                    }
+                    task = (Task<T>)existing;
+                    return true;
                 }
             }
 
@@ -69,36 +57,55 @@ namespace BeatmapDifficultyLookupCache
         /// <returns>A task containing the value.</returns>
         public Task<T> GetOrAddAsync<T>(object key, Func<Task<T>> valueCreator, Action<ICacheEntry, T> setOptions)
         {
+            Task<T>? creationTask = null;
+
             lock (cache)
             {
                 if (TryGetValue<T>(key, out var existingTask))
                     return existingTask;
 
-                var task = createAdditionTask();
-                cache.Set(key, task);
-                return task;
+                return cache.Set(key, creationTask = createAdditionTask());
             }
 
             Task<T> createAdditionTask() => Task.Run(async () =>
             {
-                var value = await valueCreator().ConfigureAwait(false);
-
-                lock (cache)
+                try
                 {
-                    // Check if the entry is still in the dictionary. It could have been removed during the above value creation via a call to Remove().
-                    if (!cache.TryGetValue(key, out _))
-                        return value;
+                    var value = await valueCreator().ConfigureAwait(false);
 
-                    // If the entry still exists, replace it with the new value.
-                    using (var entry = cache.CreateEntry(key))
+                    lock (cache)
                     {
-                        entry.SetValue(value);
-                        setOptions(entry, value);
+                        // Check if the entry is still valid. It could have been removed during the above value creation via a call to Remove().
+                        if (!isCurrentTask())
+                            return value;
+
+                        // If the entry is still valid, set its options.
+                        using (var entry = cache.CreateEntry(key))
+                        {
+                            entry.SetValue(creationTask); // Copy the current value across.
+                            setOptions(entry, value);
+                        }
+
+                        return value;
+                    }
+                }
+                catch
+                {
+                    lock (cache)
+                    {
+                        if (isCurrentTask())
+                            Remove(key);
                     }
 
-                    return value;
+                    throw;
                 }
             });
+
+            bool isCurrentTask()
+            {
+                lock (cache)
+                    return cache.TryGetValue(key, out var task) && task == creationTask;
+            }
         }
 
         /// <summary>
