@@ -171,7 +171,7 @@ namespace BeatmapDifficultyLookupCache
 
             return apiMods
                    // A few special cases... (ToMod() throws an exception here).
-                   .Where(m => !string.IsNullOrWhiteSpace(m.Acronym) && m.Acronym != "ScoreV2")
+                   .Where(m => !string.IsNullOrWhiteSpace(m.Acronym) && m.Acronym.ToLowerInvariant() != "scorev2")
                    // Instantiate the API-provided mod...
                    .Select(m => (apiMod: m, mod: m.ToMod(ruleset)))
                    // ... and check whether it derives any classes which the difficulty adjustment mods also derive.
