@@ -69,35 +69,22 @@ namespace BeatmapDifficultyLookupCache
 
             Task<T> createAdditionTask() => Task.Run(async () =>
             {
-                try
+                var value = await valueCreator().ConfigureAwait(false);
+
+                lock (cache)
                 {
-                    var value = await valueCreator().ConfigureAwait(false);
-
-                    lock (cache)
-                    {
-                        // Check if the entry is still valid. It could have been removed during the above value creation via a call to Remove().
-                        if (!isCurrentTask())
-                            return value;
-
-                        // If the entry is still valid, allow the user to now set its options.
-                        using (var entry = cache.CreateEntry(key))
-                        {
-                            entry.SetValue(creationTask); // Copy the current value across.
-                            setOptions(entry, value);
-                        }
-
+                    // Check if the entry is still valid. It could have been removed during the above value creation via a call to Remove().
+                    if (!isCurrentTask())
                         return value;
-                    }
-                }
-                catch
-                {
-                    lock (cache)
+
+                    // If the entry is still valid, allow the user to now set its options.
+                    using (var entry = cache.CreateEntry(key))
                     {
-                        if (isCurrentTask())
-                            Remove(key);
+                        entry.SetValue(creationTask); // Copy the current value across.
+                        setOptions(entry, value);
                     }
 
-                    throw;
+                    return value;
                 }
             });
 
