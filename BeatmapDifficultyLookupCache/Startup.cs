@@ -20,6 +20,7 @@ namespace BeatmapDifficultyLookupCache
         {
             services.AddControllers().AddNewtonsoftJson();
             services.AddMemoryCache();
+            services.AddSingleton<SafeMemoryCache, SafeMemoryCache>();
             services.AddSingleton<DifficultyCache>();
         }
 
