@@ -16,7 +16,6 @@ using osu.Game.Rulesets;
 using osu.Game.Rulesets.Difficulty;
 using osu.Game.Rulesets.Difficulty.Skills;
 using osu.Game.Rulesets.Mods;
-using osu.Game.Utils;
 
 namespace BeatmapDifficultyLookupCache
 {
@@ -37,18 +36,18 @@ namespace BeatmapDifficultyLookupCache
 
         private static readonly DifficultyAttributes empty_attributes = new DifficultyAttributes(Array.Empty<Mod>(), Array.Empty<Skill>(), -1);
 
-        public async Task<DifficultyAttributes> GetDifficultyAsync(DifficultyRequest request)
+        public Task<DifficultyAttributes> GetDifficultyAsync(DifficultyRequest request)
         {
             if (request.BeatmapId == 0)
-                return empty_attributes;
+                return Task.FromResult(empty_attributes);
 
             CachedBeatmapEntry? beatmapEntry = null;
 
-            return await cache.GetOrAddAsync(getRequestKey(request), async () =>
+            return cache.GetOrAddAsync(getRequestKey(request), async () =>
             {
                 try
                 {
-                    beatmapEntry = await getBeatmap(request.BeatmapId);
+                    beatmapEntry = await getBeatmapAsync(request.BeatmapId);
 
                     var ruleset = available_rulesets.First(r => r.RulesetInfo.ID == request.RulesetId);
                     var mods = request.Mods.Select(m => m.ToMod(ruleset)).ToArray();
@@ -91,7 +90,7 @@ namespace BeatmapDifficultyLookupCache
             }
         }
 
-        private async Task<CachedBeatmapEntry> getBeatmap(int beatmapId) => await cache.GetOrAddAsync(getBeatmapKey(beatmapId), async () =>
+        private Task<CachedBeatmapEntry> getBeatmapAsync(int beatmapId) => cache.GetOrAddAsync(getBeatmapKey(beatmapId), async () =>
         {
             logger.LogInformation("Downloading beatmap ({BeatmapId})", beatmapId);
 
@@ -115,27 +114,7 @@ namespace BeatmapDifficultyLookupCache
 
         private static string getBeatmapKey(int beatmapId) => $"beatmap: {beatmapId}";
 
-        private static string getRequestKey(DifficultyRequest request)
-        {
-            var hashCode = new HashCode();
-
-            hashCode.Add(request.BeatmapId);
-            hashCode.Add(request.RulesetId);
-
-            // Todo: Temporary (APIMod doesn't implement GetHashCode()).
-            foreach (var m in request.Mods.OrderBy(m => m.Acronym))
-            {
-                hashCode.Add(m.Acronym);
-
-                foreach (var (key, value) in m.Settings.OrderBy(s => s.Key))
-                {
-                    hashCode.Add(key);
-                    hashCode.Add(ModUtils.GetSettingUnderlyingValue(value));
-                }
-            }
-
-            return $"request: {hashCode.ToHashCode()}";
-        }
+        private static string getRequestKey(DifficultyRequest request) => $"request: {request.GetHashCode()}";
 
         private static List<Ruleset> getRulesets()
         {

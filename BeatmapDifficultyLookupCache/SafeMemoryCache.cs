@@ -15,11 +15,23 @@ namespace BeatmapDifficultyLookupCache
     {
         private readonly IMemoryCache cache;
 
+        /// <summary>
+        /// Creates a new <see cref="SafeMemoryCache"/>.
+        /// </summary>
+        /// <param name="cache">The backing <see cref="IMemoryCache"/>.</param>
         public SafeMemoryCache(IMemoryCache cache)
         {
             this.cache = cache;
         }
 
+        /// <summary>
+        /// Attempts to retrieve a value from the cache.
+        /// The value is wrapped in a <see cref="Task{T}"/> which may not immediately resolve to the final value.
+        /// </summary>
+        /// <param name="key">The key for the value.</param>
+        /// <param name="task">The returned value, wrapped in a task. A non-null value indicates that the object is either completely available or is in the process of being created.</param>
+        /// <typeparam name="T">The value type.</typeparam>
+        /// <returns>Whether the value is completely available or is in the process of being created. <paramref name="task"/> cannot be <c>null</c> if this value is <c>true</c>.</returns>
         public bool TryGetValue<T>(object key, [NotNullWhen(true)] out Task<T>? task)
         {
             lock (cache)
@@ -37,6 +49,7 @@ namespace BeatmapDifficultyLookupCache
                             return true;
 
                         default:
+                            // This cannot happen.
                             throw new Exception("Invalid type.");
                     }
                 }
@@ -46,6 +59,14 @@ namespace BeatmapDifficultyLookupCache
             return false;
         }
 
+        /// <summary>
+        /// Retrieves a value from the cache, or adds it if not existent.
+        /// </summary>
+        /// <param name="key">The key for the value.</param>
+        /// <param name="valueCreator">A function which creates the value if not existing.</param>
+        /// <param name="setOptions">A function which sets the <see cref="ICacheEntry"/> parameters after the value has been created.</param>
+        /// <typeparam name="T">The value type.</typeparam>
+        /// <returns>A task containing the value.</returns>
         public Task<T> GetOrAddAsync<T>(object key, Func<Task<T>> valueCreator, Action<ICacheEntry, T> setOptions)
         {
             lock (cache)
@@ -80,6 +101,10 @@ namespace BeatmapDifficultyLookupCache
             });
         }
 
+        /// <summary>
+        /// Removes a value from the cache.
+        /// </summary>
+        /// <param name="key">The key for the value.</param>
         public void Remove(object key)
         {
             lock (cache)
