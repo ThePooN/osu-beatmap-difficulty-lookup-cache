@@ -13,12 +13,15 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
+using osu.Framework.Extensions.TypeExtensions;
 using osu.Framework.IO.Network;
 using osu.Game.Beatmaps;
+using osu.Game.Online.API;
 using osu.Game.Rulesets;
 using osu.Game.Rulesets.Difficulty;
 using osu.Game.Rulesets.Difficulty.Skills;
 using osu.Game.Rulesets.Mods;
+using osu.Game.Utils;
 
 namespace BeatmapDifficultyLookupCache
 {
@@ -47,6 +50,16 @@ namespace BeatmapDifficultyLookupCache
             if (request.BeatmapId == 0)
                 return empty_attributes;
 
+            var ruleset = available_rulesets.First(r => r.RulesetInfo.ID == request.RulesetId);
+
+            // Recreate the request, this time with any irrelevant mods trimmed out, for caching purposes.
+            request = new DifficultyRequest
+            {
+                BeatmapId = request.BeatmapId,
+                RulesetId = request.RulesetId,
+                Mods = trimNonDifficultyAdjustmentMods(ruleset, request.Mods)
+            };
+
             return await cache.GetOrCreateAsync(request, async entry =>
             {
                 logger.LogInformation("Computing difficulty (beatmap: {BeatmapId}, ruleset: {RulesetId}, mods: {Mods})",
@@ -61,7 +74,6 @@ namespace BeatmapDifficultyLookupCache
 
                 try
                 {
-                    var ruleset = available_rulesets.First(r => r.RulesetInfo.ID == request.RulesetId);
                     var mods = request.Mods.Select(m => m.ToMod(ruleset)).ToArray();
                     var beatmap = await getBeatmap(request.BeatmapId);
 
@@ -128,6 +140,38 @@ namespace BeatmapDifficultyLookupCache
 
                 return new LoaderWorkingBeatmap(req.ResponseStream);
             });
+        }
+
+        /// <summary>
+        /// Trims all mods from a given <see cref="Mod"/> array which do not adjust difficulty.
+        /// </summary>
+        // Todo: Combine with osu-tools?
+        private static APIMod[] trimNonDifficultyAdjustmentMods(Ruleset ruleset, IEnumerable<APIMod> apiMods)
+        {
+            var dummyDifficultyCalculator = ruleset.CreateDifficultyCalculator(new DummyWorkingBeatmap(null, null)
+            {
+                BeatmapInfo =
+                {
+                    Ruleset = ruleset.RulesetInfo,
+                    BaseDifficulty = new BeatmapDifficulty()
+                }
+            });
+
+            var difficultyAdjustmentMods = ModUtils.FlattenMods(dummyDifficultyCalculator.CreateDifficultyAdjustmentModCombinations())
+                                                   .SelectMany(m => m.GetType().EnumerateBaseTypes())
+                                                   .Where(t => t.IsClass)
+                                                   .Distinct()
+                                                   .ToArray();
+
+            return apiMods
+                   // A few special cases... (ToMod() throws an exception here).
+                   .Where(m => !string.IsNullOrWhiteSpace(m.Acronym) && m.Acronym != "ScoreV2")
+                   // Instantiate the API-provided mod...
+                   .Select(m => (apiMod: m, mod: m.ToMod(ruleset)))
+                   // ... and check whether it derives any classes which the difficulty adjustment mods also derive.
+                   .Where(kvp => difficultyAdjustmentMods.Any(t => t.IsInstanceOfType(kvp.mod)))
+                   // Finally, pull out the API mod.
+                   .Select(kvp => kvp.apiMod).ToArray();
         }
 
         private static List<Ruleset> getRulesets()
